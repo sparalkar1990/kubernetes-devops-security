@@ -73,18 +73,19 @@ systemctl enable docker
 
 
 echo ".........----------------#################._.-.-Java and MAVEN-.-._.#################----------------........."
-apt install openjdk-25-jdk maven -y
+apt-get install -y openjdk-21-jdk maven fontconfig
 java -version
 mvn -v
 
 echo ".........----------------#################._.-.-JENKINS-.-._.#################----------------........."
-wget -q -O - https://pkg.jenkins.io/debian-stable/jenkins.io-2023.key | gpg --dearmor -o /usr/share/keyrings/jenkins.gpg
-echo 'deb [signed-by=/usr/share/keyrings/jenkins.gpg] http://pkg.jenkins.io/debian-stable binary/' > /etc/apt/sources.list.d/jenkins.list
-apt update
-apt install -y jenkins
+mkdir -p -m 0755 /etc/apt/keyrings
+wget -q -O /etc/apt/keyrings/jenkins-keyring.asc https://pkg.jenkins.io/debian-stable/jenkins.io-2026.key || exit 1
+echo 'deb [signed-by=/etc/apt/keyrings/jenkins-keyring.asc] https://pkg.jenkins.io/debian-stable binary/' > /etc/apt/sources.list.d/jenkins.list
+apt-get update || exit 1
+apt-get install -y jenkins || exit 1
 systemctl daemon-reload
-systemctl enable jenkins
-systemctl start jenkins
+systemctl enable jenkins || exit 1
+systemctl start jenkins || exit 1
 usermod -a -G docker jenkins
 echo "jenkins ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
 
