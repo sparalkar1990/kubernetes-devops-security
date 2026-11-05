@@ -1,33 +1,43 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-set -eo pipefail
+set -euo pipefail
 
-JENKINS_URL='http://localhost:8080'
+JENKINS_URL="${JENKINS_URL:-http://localhost:8080}"
+JENKINS_USER="${JENKINS_USER:-admin}"
+JENKINS_PASSWORD="${JENKINS_PASSWORD:-}"
+JENKINS_URL="${JENKINS_URL%/}"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+COOKIE_JAR="$(mktemp)"
+trap 'rm -f "$COOKIE_JAR"' EXIT
 
-JENKINS_CRUMB=$(curl -s --cookie-jar /tmp/cookies -u admin:admin ${JENKINS_URL}/crumbIssuer/api/json | jq .crumb -r)
+if [[ -z "$JENKINS_PASSWORD" ]]; then
+  read -rsp "Jenkins password for ${JENKINS_USER}: " JENKINS_PASSWORD
+  printf '\n'
+fi
 
-JENKINS_TOKEN=$(curl -s -X POST -H "Jenkins-Crumb:${JENKINS_CRUMB}" --cookie /tmp/cookies "${JENKINS_URL}/me/descriptorByName/jenkins.security.ApiTokenProperty/generateNewToken?newTokenName=demo-token66" -u admin:admin | jq .data.tokenValue -r)
+if ! command -v curl >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; then
+  echo "This script requires curl and jq." >&2
+  exit 1
+fi
 
-echo $JENKINS_URL
-echo $JENKINS_CRUMB
-echo $JENKINS_TOKEN
+CRUMB_JSON="$(curl --fail --silent --show-error --cookie-jar "$COOKIE_JAR" \
+  --user "${JENKINS_USER}:${JENKINS_PASSWORD}" \
+  "${JENKINS_URL}/crumbIssuer/api/json")"
+CRUMB_FIELD="$(jq -er '.crumbRequestField' <<<"$CRUMB_JSON")"
+CRUMB="$(jq -er '.crumb' <<<"$CRUMB_JSON")"
 
-while read plugin; do
-   echo "........Installing ${plugin} .."
-   curl -s POST --data "<jenkins><install plugin='${plugin}' /></jenkins>" -H 'Content-Type: text/xml' "$JENKINS_URL/pluginManager/installNecessaryPlugins" --user "admin:$JENKINS_TOKEN"
-done < plugins.txt
+while IFS= read -r plugin || [[ -n "$plugin" ]]; do
+  [[ -z "$plugin" || "$plugin" == \#* ]] && continue
 
+  echo "Requesting latest compatible version of ${plugin}"
+  curl --fail --silent --show-error --cookie "$COOKIE_JAR" \
+    --user "${JENKINS_USER}:${JENKINS_PASSWORD}" \
+    --request POST \
+    --header "${CRUMB_FIELD}: ${CRUMB}" \
+    --header 'Content-Type: text/xml' \
+    --data "<jenkins><install plugin='${plugin}' /></jenkins>" \
+    "${JENKINS_URL}/pluginManager/installNecessaryPlugins"
+  printf '\n'
+done <"${SCRIPT_DIR}/plugins.txt"
 
-#### we also need to do a restart for some plugins
-
-#### check all plugins installed in jenkins
-# 
-# http://<jenkins-url>/script
-
-# Jenkins.instance.pluginManager.plugins.each{
-#   plugin -> 
-#     println ("${plugin.getDisplayName()} (${plugin.getShortName()}): ${plugin.getVersion()}")
-# }
-
-
-#### Check for updates/errors - http://<jenkins-url>/updateCenter
+echo "Plugin install requests completed. Review Manage Jenkins > Plugins and restart Jenkins if requested."
