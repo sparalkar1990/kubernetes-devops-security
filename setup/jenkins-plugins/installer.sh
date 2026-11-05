@@ -25,17 +25,27 @@ CRUMB_JSON="$(curl --fail --silent --show-error --cookie-jar "$COOKIE_JAR" \
   "${JENKINS_URL}/crumbIssuer/api/json")"
 CRUMB_FIELD="$(jq -er '.crumbRequestField' <<<"$CRUMB_JSON")"
 CRUMB="$(jq -er '.crumb' <<<"$CRUMB_JSON")"
+JENKINS_VERSION="$(curl --fail --silent --show-error \
+  --user "${JENKINS_USER}:${JENKINS_PASSWORD}" \
+  "${JENKINS_URL}/api/json?tree=version" | jq -er '.version')"
+UPDATE_CENTER_JSON="$(curl --fail --silent --show-error \
+  "https://updates.jenkins.io/update-center.actual.json?version=${JENKINS_VERSION}")"
 
 while IFS= read -r plugin || [[ -n "$plugin" ]]; do
   [[ -z "$plugin" || "$plugin" == \#* ]] && continue
 
-  echo "Requesting latest compatible version of ${plugin}"
+  plugin_version="$(jq -er --arg plugin "$plugin" '.plugins[$plugin].version' <<<"$UPDATE_CENTER_JSON")" || {
+    echo "No compatible ${plugin} release was found for Jenkins ${JENKINS_VERSION}." >&2
+    exit 1
+  }
+
+  echo "Requesting ${plugin}@${plugin_version} for Jenkins ${JENKINS_VERSION}"
   curl --fail --silent --show-error --cookie "$COOKIE_JAR" \
     --user "${JENKINS_USER}:${JENKINS_PASSWORD}" \
     --request POST \
     --header "${CRUMB_FIELD}: ${CRUMB}" \
     --header 'Content-Type: text/xml' \
-    --data "<jenkins><install plugin='${plugin}' /></jenkins>" \
+    --data "<jenkins><install plugin='${plugin}@${plugin_version}' /></jenkins>" \
     "${JENKINS_URL}/pluginManager/installNecessaryPlugins"
   printf '\n'
 done <"${SCRIPT_DIR}/plugins.txt"
